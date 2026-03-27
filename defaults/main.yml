@@ -1,0 +1,19 @@
+---
+# Application settings
+quiz_app_name: "Quiz Application"
+quiz_app_home: "/opt/quiz-ansible"
+quiz_app_port: 3000
+quiz_app_user: "root"
+quiz_app_repo: "https://gitlab.com/ftutorials-labs/quiz-ansible.git"
+quiz_app_version: "main"
+
+# Node.js settings
+quiz_nodejs_version: 23
+
+# Installation flags
+quiz_install_serve: true
+quiz_system_update: true
+quiz_serve_global: true
+
+# Service settings
+quiz_serve_async_timeout: 3600

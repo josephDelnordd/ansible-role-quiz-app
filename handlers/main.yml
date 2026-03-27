@@ -1,0 +1,7 @@
+---
+- name: restart serve application
+  ansible.builtin.shell: |
+    pkill -f 'serve -s {{ quiz_app_home }}'
+    sleep 1
+    cd {{ quiz_app_home }} && nohup serve -s dist > /dev/null 2>&1 &
+  listen: "restart serve"

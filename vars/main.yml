@@ -1,0 +1,15 @@
+---
+# Ces variables sont définies au runtime
+debian_packages:
+  - git
+  - curl
+  - build-essential
+  - python3-pip
+
+rocky_packages:
+  - git
+  - curl
+  - gcc
+  - gcc-c++
+  - make
+  - python3-pip

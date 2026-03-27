@@ -1,0 +1,359 @@
+---
+# ============================================================================
+# SECTION 1 : Déterminer le type de système
+# ============================================================================
+- name: Set OS-specific variables
+  ansible.builtin.set_fact:
+    is_debian: "{{ ansible_os_family == 'Debian' }}"
+    is_redhat: "{{ ansible_os_family == 'RedHat' }}"
+  tags:
+    - always
+
+- name: Display system information
+  ansible.builtin.debug:
+    msg: |
+      🖥️  Système détecté:
+      - Distribution: {{ ansible_distribution }} {{ ansible_distribution_version }}
+      - Famille OS: {{ ansible_os_family }}
+      - Kernel: {{ ansible_kernel }}
+  tags:
+    - always
+
+# ============================================================================
+# SECTION 2 : Mettre à jour les paquets
+# ============================================================================
+- name: Update package index (Debian/Ubuntu)
+  ansible.builtin.apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  when:
+    - is_debian
+    - quiz_system_update
+  tags:
+    - system_update
+
+- name: Update packages (RedHat/Rocky)
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+  when:
+    - is_redhat
+    - quiz_system_update
+  tags:
+    - system_update
+
+# ============================================================================
+# SECTION 3 : Installer git
+# ============================================================================
+- name: Install git (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name: git
+    state: present
+  when: is_debian
+  tags:
+    - dependencies
+
+- name: Install git (RedHat/Rocky)
+  ansible.builtin.dnf:
+    name: git
+    state: present
+  when: is_redhat
+  tags:
+    - dependencies
+
+# ============================================================================
+# SECTION 4 : Configurer Node.js
+# ============================================================================
+- name: Download Node.js setup script (RedHat/Rocky)
+  ansible.builtin.get_url:
+    url: "https://rpm.nodesource.com/setup_{{ quiz_nodejs_version }}.x"
+    dest: /tmp/nodesource_setup.sh
+    mode: "0755"
+  when: is_redhat
+  tags:
+    - nodejs
+
+- name: Execute Node.js setup script (RedHat/Rocky)
+  ansible.builtin.command: /tmp/nodesource_setup.sh
+  when: is_redhat
+  changed_when: false
+  tags:
+    - nodejs
+
+- name: Setup Node.js repository (Debian/Ubuntu)
+  ansible.builtin.shell:
+    cmd: "curl -fsSL https://deb.nodesource.com/setup_{{ quiz_nodejs_version }}.x | sudo -E bash -"
+  when: is_debian
+  changed_when: false
+  tags:
+    - nodejs
+
+# ============================================================================
+# SECTION 5 : Installer Node.js et npm
+# ============================================================================
+- name: Install nodejs (RedHat/Rocky)
+  ansible.builtin.dnf:
+    name: nodejs
+    state: present
+  when: is_redhat
+  tags:
+    - nodejs
+
+- name: Install nodejs (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name: nodejs
+    state: present
+    update_cache: yes
+  when: is_debian
+  tags:
+    - nodejs
+
+- name: Verify Node.js installation
+  ansible.builtin.command: node --version
+  register: nodejs_version
+  changed_when: false
+  tags:
+    - nodejs
+
+- name: Verify npm installation
+  ansible.builtin.command: npm --version
+  register: npm_version
+  changed_when: false
+  tags:
+    - nodejs
+
+- name: Display Node.js versions
+  ansible.builtin.debug:
+    msg: |
+      ✅ Node.js installé:
+      - Node: {{ nodejs_version.stdout }}
+      - npm: {{ npm_version.stdout }}
+  tags:
+    - nodejs
+
+# ============================================================================
+# SECTION 6 : Supprimer le répertoire existant
+# ============================================================================
+- name: Remove existing application directory
+  ansible.builtin.file:
+    path: "{{ quiz_app_home }}"
+    state: absent
+  tags:
+    - app_deployment
+
+# ============================================================================
+# SECTION 7 : Cloner le dépôt Git
+# ============================================================================
+- name: Clone git repository
+  ansible.builtin.git:
+    repo: "{{ quiz_app_repo }}"
+    dest: "{{ quiz_app_home }}"
+    version: "{{ quiz_app_version }}"
+    force: yes
+  register: git_clone
+  tags:
+    - git_clone
+
+- name: Display git clone result
+  ansible.builtin.debug:
+    msg: |
+      ✅ Repository cloné:
+      - URL: {{ quiz_app_repo }}
+      - Version: {{ quiz_app_version }}
+      - Destination: {{ quiz_app_home }}
+      - Changed: {{ git_clone.changed }}
+  tags:
+    - git_clone
+
+# ============================================================================
+# SECTION 8 : Installer les dépendances npm
+# ============================================================================
+- name: Install npm dependencies
+  ansible.builtin.npm:
+    path: "{{ quiz_app_home }}"
+  register: npm_install
+  tags:
+    - npm_dependencies
+
+- name: Display npm install result
+  ansible.builtin.debug:
+    msg: "✅ Dépendances npm installées avec succès"
+  when: npm_install.changed
+  tags:
+    - npm_dependencies
+
+# ============================================================================
+# SECTION 9 : Compiler l'application
+# ============================================================================
+- name: Build the application
+  ansible.builtin.command:
+    cmd: npm run build
+    chdir: "{{ quiz_app_home }}"
+  register: build_result
+  tags:
+    - app_build
+
+- name: Verify build directory exists
+  ansible.builtin.stat:
+    path: "{{ quiz_app_home }}/dist"
+  register: dist_dir
+  tags:
+    - app_build
+
+- name: Display build result
+  ansible.builtin.debug:
+    msg: |
+      ✅ Application compilée:
+      - Build status: {{ 'Success' if build_result.rc == 0 else 'Failed' }}
+      - Build directory: {{ quiz_app_home }}/dist
+      - Dist exists: {{ dist_dir.stat.exists }}
+  tags:
+    - app_build
+
+# ============================================================================
+# SECTION 10 : Installer serve globalement
+# ============================================================================
+- name: Install serve package globally
+  ansible.builtin.npm:
+    name: serve
+    global: "{{ quiz_serve_global }}"
+  when: quiz_install_serve
+  register: serve_install
+  tags:
+    - serve_install
+
+- name: Verify serve installation
+  ansible.builtin.command: serve --version
+  register: serve_version
+  when: quiz_install_serve
+  changed_when: false
+  tags:
+    - serve_install
+
+- name: Display serve version
+  ansible.builtin.debug:
+    msg: "✅ Serve installé: {{ serve_version.stdout }}"
+  when: quiz_install_serve
+  tags:
+    - serve_install
+
+# ============================================================================
+# SECTION 11 : Arrêter les processus serve existants
+# ============================================================================
+- name: Kill any existing serve process
+  ansible.builtin.shell:
+    cmd: pkill -9 -f 'serve -s' || true
+  failed_when: false
+  changed_when: false
+  tags:
+    - service_management
+
+- name: Wait before starting new process
+  ansible.builtin.pause:
+    seconds: 1
+  tags:
+    - service_management
+
+# ============================================================================
+# SECTION 12 : Lancer l'application en tâche de fond
+# ============================================================================
+- name: Start serve application asynchronously
+  ansible.builtin.shell: "nohup serve -s dist > /dev/null 2>&1 &"
+  args:
+    chdir: "{{ quiz_app_home }}"
+  async: "{{ quiz_serve_async_timeout }}"
+  poll: 0
+  register: serve_async_job
+  tags:
+    - service_management
+
+- name: Wait for serve to start
+  ansible.builtin.pause:
+    seconds: 2
+  tags:
+    - service_management
+
+- name: Display application startup information
+  ansible.builtin.debug:
+    msg: |
+      ⚠️  Application lancée en tâche de fond (async):
+      - Host: {{ inventory_hostname }}
+      - Job ID: {{ serve_async_job.ansible_job_id }}
+      - Timeout: {{ quiz_serve_async_timeout }} secondes
+      - Chemin: {{ quiz_app_home }}
+      - Port: {{ quiz_app_port }}
+
+      📝 Commande lancée:
+      nohup serve -s dist > /dev/null 2>&1 &
+
+      📊 Pour vérifier le statut:
+      pgrep -f 'serve -s' || echo 'Processus serve non trouvé'
+
+      🛑 Pour arrêter:
+      pkill -f 'serve -s {{ quiz_app_home }}'
+  tags:
+    - service_management
+
+# ============================================================================
+# SECTION 13 : Vérifier que l'application est prête
+# ============================================================================
+- name: Wait for application to be ready
+  ansible.builtin.uri:
+    url: "http://localhost:{{ quiz_app_port }}"
+    status_code: 200
+  retries: 15
+  delay: 2
+  register: app_ready
+  until: app_ready.status == 200
+  failed_when: false
+  tags:
+    - health_check
+
+- name: Display health check result
+  ansible.builtin.debug:
+    msg: |
+      {% if app_ready.status == 200 %}
+      ✅ Application en bonne santé - Status: {{ app_ready.status }}
+      {% else %}
+      ⚠️  Application ne répond pas encore - Status: {{ app_ready.status | default('Unknown') }}
+      {% endif %}
+  tags:
+    - health_check
+
+# ============================================================================
+# SECTION 14 : Afficher le résumé du déploiement
+# ============================================================================
+- name: Display deployment summary
+  ansible.builtin.debug:
+    msg: |
+
+      ╔════════════════════════════════════════════════════════════════╗
+      ║          ✅ DÉPLOIEMENT RÉUSSI - {{ quiz_app_name }}          ║
+      ╠════════════════════════════════════════════════════════════════╣
+      ║                                                                ║
+      ║  📊 INFORMATIONS DE L'APPLICATION:                            ║
+      ║  ├─ Nom: {{ quiz_app_name }}                                  ║
+      ║  ├─ Dossier: {{ quiz_app_home }}                              ║
+      ║  ├─ Port: {{ quiz_app_port }}                                 ║
+      ║  ├─ Mode: Asynchrone (nohup serve)                            ║
+      ║  └─ URL: http://{{ ansible_default_ipv4.address }}:{{ quiz_app_port }} ║
+      ║                                                                ║
+      ║  🔧 COMMANDES UTILES:                                         ║
+      ║  ├─ Vérifier le process: pgrep -f 'serve -s'                 ║
+      ║  ├─ Arrêter: pkill -f 'serve -s {{ quiz_app_home }}'         ║
+      ║  ├─ Port écoute: netstat -tln | grep {{ quiz_app_port }}     ║
+      ║  ├─ Redémarrer: pkill -f 'serve' && cd {{ quiz_app_home }} && nohup serve -s dist > /dev/null 2>&1 & ║
+      ║  └─ Tester: curl http://localhost:{{ quiz_app_port }}        ║
+      ║                                                                ║
+      ║  📦 VERSIONS INSTALLÉES:                                      ║
+      ║  ├─ Node.js: {{ nodejs_version.stdout }}                      ║
+      ║  ├─ npm: {{ npm_version.stdout }}                             ║
+      ║  └─ Serve: {{ serve_version.stdout if serve_version is defined else 'N/A' }} ║
+      ║                                                                ║
+      ║  🌐 ACCÈS À L'APPLICATION:                                    ║
+      ║  └─ http://{{ ansible_default_ipv4.address }}:{{ quiz_app_port }} ║
+      ║                                                                ║
+      ╚════════════════════════════════════════════════════════════════╝
+
+  tags:
+    - summary # Tag pour le résumé final du déploiement
